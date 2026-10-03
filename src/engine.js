@@ -40,6 +40,14 @@ export async function loadPredictionEngine({
     }),
   );
   const sources = new Map(originals);
+  const rulesDigest = createHash("sha256").update(JSON.stringify(originals)).digest("hex");
+  const originalDirectory = path.join(os.tmpdir(), "mononoke-agent-original", rulesDigest);
+  await mkdir(originalDirectory, { recursive: true });
+  await writeFile(path.join(originalDirectory, "package.json"), '{"type":"module"}');
+  for (const [file, source] of originals) {
+    await mkdir(path.dirname(path.join(originalDirectory, file)), { recursive: true });
+    await writeFile(path.join(originalDirectory, file), source);
+  }
   const replaceOnce = (source, marker, replacement) => {
     if (source.split(marker).length !== 2)
       throw new Error(
@@ -107,5 +115,7 @@ export async function loadPredictionEngine({
   const { createSim } = await import(
     pathToFileURL(path.join(directory, "sim.js")).href
   );
-  return { createSim, digest };
+  const { createSim: originalCreateSim } = await import(pathToFileURL(path.join(originalDirectory, "sim.js")));
+  const { createConfig } = await import(pathToFileURL(path.join(originalDirectory, "config.js")));
+  return { createSim, digest, rulesDigest, originalCreateSim, createConfig };
 }

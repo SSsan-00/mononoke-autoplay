@@ -11,7 +11,11 @@
     "setup": "playwright install chromium",
     "start": "node src/cli.js",
     "jev": "node src/cli.js --provider jev",
-    "test": "node --test test/*.test.js"
+    "compare:survival": "node scripts/compare-survival.js",
+    "report:survival": "node scripts/report-survival.js",
+    "study:survival": "node scripts/run-survival-study.js",
+    "test": "node --test test/*.test.js",
+    "compare:parallel": "node scripts/compare-parallel.js"
   },
   "dependencies": {
     "playwright": "1.62.1"

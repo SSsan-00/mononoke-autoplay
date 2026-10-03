@@ -71,6 +71,19 @@ export const DIRECTIONS = Object.freeze({
   wait: [0, 0],
 });
 
+export function validateEnemyCounts(counts) {
+  const types = ['CHASER', 'DASHER', 'SHOOTER', 'LASER', 'MINE', 'JAMMER'];
+  if (!counts || typeof counts !== 'object' || Array.isArray(counts) ||
+      Object.keys(counts).some(type => !types.includes(type)))
+    throw new Error('enemiesには6種類の敵の名前と出現数を指定してください。');
+  const normalized = Object.fromEntries(types.map(type => [type, Object.hasOwn(counts, type) ? counts[type] : 0]));
+  if (Object.values(normalized).some(n => !Number.isInteger(n) || n < 0 || n > 10) ||
+      Object.values(normalized).reduce((a, b) => a + b, 0) > 30 ||
+      Object.values(normalized).every(n => n === 0))
+    throw new Error('敵は各0～10体・合計1～30体で指定してください。');
+  return normalized;
+}
+
 const directionEntries = Object.entries(DIRECTIONS);
 
 export function legalActions(state) {

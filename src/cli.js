@@ -8,6 +8,8 @@ import { HeuristicPolicy } from "./policy.js";
 import { JevPolicy } from "./jev.js";
 import { PlannerPolicy } from "./planner.js";
 import { loadPredictionEngine } from "./engine.js";
+import { RandomPolicy, SelectionRandom } from "./survival.js";
+import { validateEnemyCounts } from "./state.js";
 
 const GAME_URL = "https://aigengames.pages.dev/Games/SurviveLimitMononoke/";
 
@@ -21,6 +23,7 @@ export async function playSession(
     maxDecisions = 3000,
     onDecision = () => {},
     onState = () => {},
+    startButton = "百鬼結界にいざ出陣",
   } = {},
 ) {
   const adapter = new GameAdapter(page, { timeoutMs });
@@ -31,22 +34,32 @@ export async function playSession(
     routeDecisions: 0,
     rollingDecisions: 0,
   };
+  let firstObservedAt = null, lastState = null, deciding = false;
+  const sessionMetrics = () => ({
+    realElapsedMs: firstObservedAt === null ? null : performance.now() - firstObservedAt,
+    firstObservedGameMs: firstObservedAt === null ? null : firstGameMs,
+  });
+  let firstGameMs;
   try {
     await adapter.attach();
     if (!manual)
       await page
-        .getByRole("button", { name: "百鬼結界にいざ出陣", exact: true })
+        .getByRole("button", { name: startButton, exact: true })
         .click();
     // clickの完了より先に停止すると、Playwrightのクリック自体が待ち続けます。
     // 自動開始はクリック完了後、手動開始は待機に入る前に停止を設定します。
     await adapter.setBreakpoint(0);
     while (true) {
       const state = await adapter.nextState();
+      lastState = state;
+      if (firstObservedAt === null) { firstObservedAt = performance.now(); firstGameMs = state.elapsedMs; }
       await onState(state);
       if (state.status === "cleared" || state.status === "failed") {
         // 停止を解除した後、ゲーム自身が演出・結果画面への遷移を処理します。
         return {
           status: state.status,
+          elapsedMs: state.elapsedMs,
+          ...sessionMetrics(),
           survivedMs:
             state.deathAtMs ?? Math.min(state.elapsedMs, state.durationMs),
           livesLeft: state.lives,
@@ -77,7 +90,7 @@ export async function playSession(
               ? "jev"
               : policy instanceof PlannerPolicy
                 ? "planner"
-                : "heuristic",
+              : policy instanceof RandomPolicy ? "random" : "heuristic",
         };
       }
       if (state.status === "dying") {
@@ -86,7 +99,9 @@ export async function playSession(
       }
       if (decisions >= maxDecisions)
         throw new Error("判断回数の上限に達したため、自動操作を停止します。");
+      deciding = true;
       const decision = await policy.decide(state);
+      deciding = false;
       decisions++;
       if (policy instanceof PlannerPolicy || policy.planner instanceof PlannerPolicy) {
         planning.totalMs += decision.planningMs || 0;
@@ -105,6 +120,14 @@ export async function playSession(
       });
       await adapter.act(decision.action, state, intervalMs);
     }
+  } catch (error) {
+    error.session = { status: "aborted", abortReason: error.code ?? (error.name === "AbortError" ? "CANCELLED" : "SESSION_ERROR"),
+      ...sessionMetrics(), elapsedMs: lastState?.elapsedMs ?? null,
+      challenge: lastState?.challenge ?? null, decisions,
+      survivedMs: null, partialSurvivedMs: lastState?.deathAtMs ?? lastState?.elapsedMs ?? null,
+      planning, calls: policy.calls ?? 0, inputTokens: policy.inputTokens ?? 0,
+      failedDecision: deciding ? policy.lastDecision : undefined };
+    throw error;
   } finally {
     // 例外・APIタイムアウトでも、ブレークポイントを残したまま終了しません。
     await adapter.close();
@@ -147,8 +170,9 @@ export async function configureGame(page, values) {
     if (!(await button.innerText()).includes(`×${values.lives}`))
       throw new Error("ライフの設定に失敗しました。");
   }
-  if (values["each-enemy"] !== undefined) {
-    const target = Number(values["each-enemy"]);
+  if (values["each-enemy"] !== undefined || values.enemyCounts) {
+    const targets = values.enemyCounts ? Object.values(validateEnemyCounts(values.enemyCounts))
+      : Array(6).fill(Number(values["each-enemy"]));
     const rows = page.locator(".enemy-row");
     // まず全種類を0体へ戻し、途中で合計30体の上限に当たらないようにします。
     for (let i = 0; i < 6; i++) {
@@ -157,7 +181,7 @@ export async function configureGame(page, values) {
         await row.getByRole("button", { name: "−", exact: true }).click();
     }
     for (let i = 0; i < 6; i++)
-      for (let n = 0; n < target; n++)
+      for (let n = 0; n < targets[i]; n++)
         await rows
           .nth(i)
           .getByRole("button", { name: "+", exact: true })
@@ -178,6 +202,7 @@ export async function main() {
       field: { type: "string" },
       lives: { type: "string" },
       "each-enemy": { type: "string" },
+      enemies: { type: "string" },
       hard: { type: "boolean", default: false },
       attempts: { type: "string" },
       depth: { type: "string" },
@@ -188,6 +213,10 @@ export async function main() {
       "jev-direct": { type: "boolean", default: false },
       interval: { type: "string", default: "100" },
       "max-calls": { type: "string", default: "1000" },
+      comparison: { type: "boolean", default: false },
+      "selection-seed": { type: "string", default: "1" },
+      "candidate-budget": { type: "string" },
+      "all-attempts": { type: "boolean", default: false },
       "max-decisions": { type: "string", default: "3000" },
       output: { type: "string", default: "runs" },
       help: { type: "boolean", short: "h", default: false },
@@ -195,19 +224,31 @@ export async function main() {
   });
   if (values.help) {
     console.log(
-      "npm start -- [--provider heuristic|planner|jev] [--hard] [--rolling] [--jev-direct] [--depth N] [--width N] [--route-width 128] [--route-budget 750000] [--attempts 3] [--field S|M|L] [--lives 1..5] [--each-enemy 0..5] [--time 30|45|60|90|120] [--manual] [--channel chrome] [--headless] [--close-after] [--interval 100] [--max-calls 1000] [--output runs]",
+      "npm start -- [--provider heuristic|planner|jev|random] [--comparison] [--selection-seed N] [--candidate-budget N] [--all-attempts] [--hard] [--rolling] [--jev-direct] [--depth N] [--width N] [--route-width 128] [--route-budget 750000] [--attempts 3] [--field S|M|L] [--lives 1..5] [--each-enemy 0..5] [--enemies JSON] [--time 30|45|60|90|120] [--manual] [--channel chrome] [--headless] [--close-after] [--interval 100] [--max-calls 1000] [--output runs]",
     );
     return;
   }
-  if (!["heuristic", "planner", "jev"].includes(values.provider))
-    throw new Error("providerはheuristic、planner、jevのいずれかです。");
+  if (!["heuristic", "planner", "jev", "random"].includes(values.provider))
+    throw new Error("providerはheuristic、planner、jev、randomのいずれかです。");
+  if (values.provider === "random") values.comparison = true;
+  if (values.comparison && !["random", "jev"].includes(values.provider))
+    throw new Error("比較モードはrandomまたはjevで指定してください。");
+  if (values.comparison && values["jev-direct"])
+    throw new Error("比較モードとjev-directは同時に指定できません。");
+  const selectionSeed = Number(values["selection-seed"]);
+  if (!Number.isInteger(selectionSeed) || selectionSeed < 0 || selectionSeed > 0xffffffff)
+    throw new Error("selection-seedは0～4294967295の整数で指定してください。");
   if (values.hard) {
     // ユーザーと合意した最初の難条件。元ゲームの設定UIで指定します。
     values.field ??= "L";
     values.lives ??= "1";
     values.time ??= "30";
-    values["each-enemy"] ??= "5";
+    if (values.enemies === undefined) values["each-enemy"] ??= "5";
     values.attempts ??= "3";
+  }
+  if (values.enemies !== undefined) {
+    if (values['each-enemy'] !== undefined) throw new Error('enemiesとeach-enemyは同時に指定できません。');
+    values.enemyCounts = validateEnemyCounts(JSON.parse(values.enemies));
   }
   const positive = (value, name) => {
     const n = Number(value);
@@ -241,7 +282,7 @@ export async function main() {
   let lastProgressAt = 0;
   const plannerOptions = {
     depth: positive(
-      values.depth ?? (values.provider === "jev" ? "20" : "8"), "depth"),
+      values.depth ?? (values.provider === "jev" || values.comparison ? "20" : "8"), "depth"),
     width: positive(
       values.width ?? "24", "width"),
     intervalMs,
@@ -259,7 +300,11 @@ export async function main() {
     },
   };
   // ブラウザや通信を始める前に、探索設定の範囲も検証します。
-  const usesPrediction = values.provider === "planner" ||
+  if (values.comparison && (plannerOptions.depth !== 20 || plannerOptions.width !== 24 || intervalMs !== 100))
+    throw new Error("比較モードは深さ20・幅24・判断間隔100msで実行してください。");
+  const budgetPerAction = values["candidate-budget"] === undefined ? undefined
+    : positive(values["candidate-budget"], "candidate-budget");
+  const usesPrediction = values.provider === "random" || values.provider === "planner" ||
     (values.provider === "jev" && !values["jev-direct"]);
   if (usesPrediction)
     new PlannerPolicy({ createSim: () => {}, ...plannerOptions });
@@ -273,10 +318,13 @@ export async function main() {
           apiKey: process.env.TYPESAFE_API_KEY,
           model: process.env.JEV_MODEL || "jev-latest",
           maxCalls,
+          comparison: values.comparison, selectionSeed, budgetPerAction,
           planner: engine
             ? new PlannerPolicy({ ...engine, ...plannerOptions, route: false })
             : undefined,
         })
+      : values.provider === "random"
+        ? new RandomPolicy({ planner: new PlannerPolicy({ ...engine, ...plannerOptions, route: false }), selectionSeed, budgetPerAction })
       : values.provider === "planner"
         ? makePlanner(engine)
         : new HeuristicPolicy();
@@ -325,7 +373,7 @@ export async function main() {
         // 「同条件で再出陣」は同じシードを繰り返すため、設定画面から再開します。
         // ゲーム自身が新しいシードを生成します。良いシードへの書き換えはしません。
         await page
-          .getByRole("button", { name: "結界条件を再調整", exact: true })
+          .getByRole("button", { name: /^(結界条件を再調整|脅威度を上げて挑む)$/ })
           .click();
         policy =
           values.provider === "planner"
@@ -334,11 +382,17 @@ export async function main() {
               ? new HeuristicPolicy()
               : policy;
       }
-      if (attempt > 1 && policy instanceof JevPolicy && engine)
+      if (attempt > 1 && policy instanceof RandomPolicy)
+        policy = new RandomPolicy({ planner: new PlannerPolicy({ ...engine, ...plannerOptions, route: false }), selectionSeed: (selectionSeed + attempt - 1) >>> 0, budgetPerAction });
+      if (attempt > 1 && policy instanceof JevPolicy && engine) {
         policy.planner = new PlannerPolicy({ ...engine, ...plannerOptions, route: false });
+        policy.selectionSeed = (selectionSeed + attempt - 1) >>> 0;
+        policy.fallbackRandom = new SelectionRandom((policy.selectionSeed ^ 0xa5a5a5a5) >>> 0);
+      }
       console.log(`試行 ${attempt}/${attempts}`);
       let lastPrintedMs = -1000;
-      const summary = await playSession(page, policy, {
+      let summary;
+      try { summary = await playSession(page, policy, {
         manual: values.manual && attempt === 1,
         intervalMs,
         timeoutMs: values.manual ? 300000 : 30000,
@@ -360,7 +414,10 @@ export async function main() {
             lastPrintedMs = decision.elapsedMs;
           }
         },
-      });
+      }); } catch (error) {
+        await writeFile(path.join(attemptOutput, "summary.json"), JSON.stringify(error.session ?? { status: "aborted", abortReason: error.code ?? "SESSION_ERROR" }, null, 2));
+        throw error;
+      }
       summaries.push(summary);
       await writeFile(
         path.join(attemptOutput, "summary.json"),
@@ -379,7 +436,7 @@ export async function main() {
       );
       if (policy instanceof JevPolicy)
         console.log(`Jev累計: API${policy.calls}回 / 入力${policy.inputTokens}tokens`);
-      if (summary.status === "cleared") break;
+      if (summary.status === "cleared" && !values["all-attempts"]) break;
     }
     if (attempts > 1)
       await writeFile(
