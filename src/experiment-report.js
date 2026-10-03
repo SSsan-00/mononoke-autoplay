@@ -102,6 +102,7 @@ export async function writeExperimentReport(directory) {
   let report = `# ランダム選択と${manifest.live ? '実Jev' : '模擬Jev'}の生存候補比較\n\n`;
   report += `計測経路: **${manifest.mode}**。対象コミット: \`${manifest.commit}\`。コードdigest: \`${manifest.codeDigest}\`。原本ルールdigest: \`${manifest.rulesDigest}\`。日時: ${manifest.startedAt}。\n\n`;
   report += `予定${manifest.plannedTrials}試行、記録${records.length}試行。S盤面・ライフ1・${manifest.time}秒、深さ20・初手ごとの幅24・判断間隔100ms。敵構成: \`${JSON.stringify(manifest.profile.enemies)}\`。両方式の候補生成・候補0/1件の処理は共通です。\n\n`;
+  if (manifest.parallelWorkers) report += `**${manifest.parallelWorkers}プロセスの並列実行、上限${manifest.timeLimitMinutes}分。** 計算・API時間は同時実行による競合を含むため、単独プレイの速度とは比較しません。時間上限で残った試行は未開始／中断と区別し、早く終わる試行が偏って残る可能性があります。全予定試行を完了するまで性能差の確定結果として扱いません。\n\n`;
   if (!manifest.live) report += '**模擬APIの機能検証です。実Jevの性能・通信時間の評価には使えません。**\n\n';
   report += '| 方式 | 正常終了 / 試行済み | 中断 | 未開始 | クリア率（正常終了のみ） | 生存平均 / 中央値 / 下位10%（秒） | ブラウザ実時間平均（秒） | API回数 | 入力トークン |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|\n';
   for (const [method, m] of Object.entries(aggregate.methods)) report += `| ${method} | ${m.normal}/${m.attempted} | ${m.aborted} | ${m.notStarted} | ${pct(m.clearRate)} | ${f(m.survivalSeconds.mean)} / ${f(m.survivalSeconds.median)} / ${f(m.survivalSeconds.p10)} | ${f(m.realElapsedMs.mean == null ? null : m.realElapsedMs.mean / 1000)} | ${m.calls} | ${m.inputTokens} |\n`;

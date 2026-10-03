@@ -96,7 +96,7 @@ try {
     let startButton = '百鬼結界にいざ出陣';
     if (page && index > 0 && !stopReason) await browserSetup();
     for (let repeat = 0; repeat < repeats; repeat++) {
-      const order = (index + repeat) % 2 ? [...methods].reverse() : methods;
+      const order = (index + repeat + (values.mode === 'simulator' ? startSeed - 1 : 0)) % 2 ? [...methods].reverse() : methods;
       for (const method of order) {
         if (controller.signal.aborted) stopReason ??= 'CANCELLED';
         const trialId = `${index + 1}-${repeat + 1}-${method}`;
