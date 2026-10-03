@@ -1,0 +1,9 @@
+node_modules/
+runs/
+.env*
+!.env.example
+.DS_Store
+verification/**/*.png
+verification/**/*.json
+verification/v1.2-browser/
+verification/v1.2-browser-120/

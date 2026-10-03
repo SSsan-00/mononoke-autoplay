@@ -1,0 +1,19 @@
+{
+  "name": "mononoke-autoplay",
+  "version": "1.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Source-preserving debugger-based controller for Survive Limit Mononoke",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "setup": "playwright install chromium",
+    "start": "node src/cli.js",
+    "jev": "node src/cli.js --provider jev",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "playwright": "1.62.1"
+  }
+}
