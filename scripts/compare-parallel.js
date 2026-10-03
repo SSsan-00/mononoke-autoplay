@@ -10,6 +10,7 @@ import { writeExperimentReport } from '../src/experiment-report.js';
 const { values } = parseArgs({ options: {
   output: { type: 'string' }, live: { type: 'boolean', default: false },
   workers: { type: 'string', default: '4' }, minutes: { type: 'string', default: '60' },
+  'start-seed': { type: 'string', default: '1' },
   'seed-count': { type: 'string', default: '100' }, repeats: { type: 'string', default: '5' },
   enemies: { type: 'string', default: '{"CHASER":10,"DASHER":10,"JAMMER":10}' },
   'no-plot': { type: 'boolean', default: false },
@@ -19,7 +20,9 @@ const integer = name => {
   if (!Number.isSafeInteger(n) || n < 1) throw new Error(`${name}は正の整数が必要です。`);
   return n;
 };
-const seedCount = integer('seed-count'), repeats = integer('repeats');
+const seedCount = integer('seed-count'), repeats = integer('repeats'), startSeed = integer('start-seed');
+if (startSeed + seedCount - 1 > 0xffffffff || startSeed + seedCount * repeats - 1 > 0xffffffff)
+  throw new Error('ゲームまたは選択用シードが32bit範囲を超えます。');
 const workers = Math.min(integer('workers'), seedCount), minutes = integer('minutes');
 if (workers > 8 || minutes > 60) throw new Error('workersは最大8、minutesは最大60です。');
 if (!values.output) throw new Error('新規のoutputディレクトリが必要です。');
@@ -40,7 +43,7 @@ process.once('SIGINT', interrupt); process.once('SIGTERM', interrupt);
 const timer = setTimeout(() => stop('TIME_LIMIT'), Math.max(1000, minutes * 60000 - 30000));
 const save = status => writeFile(path.join(directory, 'parallel.json'), JSON.stringify({
   status, startedAt: new Date(started).toISOString(), workers, minutes,
-  plannedTrials: seedCount * repeats * 2, seedCount, repeats, stoppedReason,
+  plannedTrials: seedCount * repeats * 2, seedCount, repeats, startSeed, stoppedReason,
   elapsedMs: Date.now() - started, shards,
 }, null, 2));
 try {
@@ -50,12 +53,12 @@ try {
     const count = Math.floor(seedCount / workers) + Number(i < seedCount % workers);
     const name = `shard-${i + 1}`, shardDirectory = path.join(directory, name);
     const log = await open(path.join(directory, `${name}.log`), 'wx');
-    const shard = { name, startSeed: offset + 1, seedCount: count, seedOffset: offset };
+    const shard = { name, startSeed: offset + startSeed, seedCount: count, seedOffset: offset };
     shards.push(shard);
     const child = spawn(process.execPath, [fileURLToPath(new URL('./compare-survival.js', import.meta.url)),
-      '--mode', 'simulator', '--time', '30', '--start-seed', String(offset + 1),
+      '--mode', 'simulator', '--time', '30', '--start-seed', String(offset + startSeed),
       '--seed-count', String(count), '--repeats', String(repeats),
-      '--selection-seed', String(1 + offset * repeats), '--enemies', JSON.stringify(enemyCounts),
+      '--selection-seed', String(startSeed + offset * repeats), '--enemies', JSON.stringify(enemyCounts),
       '--max-calls', '1000000', '--output', shardDirectory, '--no-plot', ...(values.live ? ['--live'] : [])],
     { stdio: ['ignore', log.fd, log.fd] });
     children.push(child); shard.pid = child.pid; offset += count;

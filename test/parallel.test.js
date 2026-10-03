@@ -11,14 +11,14 @@ test('並列比較は独立したシード・乱数・対応IDと判断ログを
     const output = await mkdtemp(path.join(os.tmpdir(), 'mononoke-parallel-'));
     t.after(() => rm(output, { recursive: true, force: true }));
     await promisify(execFile)(process.execPath, ['scripts/compare-parallel.js', '--output', output,
-      '--workers', '2', '--minutes', '5', '--seed-count', '2', '--repeats', '1',
+      '--start-seed', '101', '--workers', '2', '--minutes', '5', '--seed-count', '2', '--repeats', '1',
       '--enemies', '{"CHASER":1}', '--no-plot']);
     const records = JSON.parse(await readFile(path.join(output, 'trials.json'), 'utf8'));
     const manifest = JSON.parse(await readFile(path.join(output, 'manifest.json'), 'utf8'));
     assert.equal(manifest.completed, true);
     assert.equal(records.length, 4);
     assert.equal(new Set(records.map(r => r.trialId)).size, 4);
-    for (const seed of [1, 2]) {
+    for (const seed of [101, 102]) {
       const pair = records.filter(r => r.challenge.seed === seed);
       assert.equal(pair.length, 2);
       assert.equal(pair[0].pairId, pair[1].pairId);
