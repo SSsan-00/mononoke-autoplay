@@ -4,16 +4,24 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { distribution } from '../src/experiment.js';
+import { parseArgs } from 'node:util';
+import { validateEnemyCounts } from '../src/state.js';
 
-if (!process.argv[2]) throw new Error('結果を保存する新規ディレクトリを指定してください。');
+const { values, positionals } = parseArgs({ allowPositionals: true, options: {
+  enemies: { type: 'string' }, 'fixed-time': { type: 'boolean', default: false } } });
+if (!positionals[0]) throw new Error('結果を保存する新規ディレクトリを指定してください。');
 if (!process.env.TYPESAFE_API_KEY) throw new Error('TYPESAFE_API_KEYが必要です。');
-const root = path.resolve(process.argv[2]);
+const root = path.resolve(positionals[0]);
+const enemyCounts = values.enemies ? validateEnemyCounts(JSON.parse(values.enemies)) : null;
 let currentChild;
 const interrupt = () => currentChild?.kill('SIGINT');
 process.once('SIGINT', interrupt); process.once('SIGTERM', interrupt);
 await mkdir(root, { recursive: true });
 const state = { startedAt: new Date().toISOString(), status: 'running', phases: [],
   apiCallLimitPerPhase: 1000000, plan: '30s simulator pilot (60), browser timing pilot (60), simulator full (1000); extend to 120s if both full clear rates >=95% and paired survival CI includes zero' };
+state.enemyCounts = enemyCounts;
+state.fixedTime = values['fixed-time'];
+if (state.fixedTime) state.plan = 'Fixed S/30s: simulator pilot (60), browser timing pilot (60), simulator full (1000); no 120s extension';
 await writeFile(path.join(root, 'study.json'), JSON.stringify(state, null, 2), { flag: 'wx' });
 const save = () => writeFile(path.join(root, 'study.json'), JSON.stringify(state, null, 2));
 
@@ -23,7 +31,8 @@ async function phase(name, mode, time, seeds, repeats) {
   state.phases.push(entry); state.currentPhase = name; await save();
   const child = spawn(process.execPath, [fileURLToPath(new URL('./compare-survival.js', import.meta.url)),
     '--live', '--mode', mode, '--time', String(time), '--seed-count', String(seeds), '--repeats', String(repeats),
-    '--max-calls', String(state.apiCallLimitPerPhase), '--output', directory], { stdio: 'inherit' });
+    '--max-calls', String(state.apiCallLimitPerPhase), '--output', directory,
+    ...(enemyCounts ? ['--enemies', JSON.stringify(enemyCounts)] : [])], { stdio: 'inherit' });
   currentChild = child;
   entry.pid = child.pid; await save();
   const code = await new Promise((resolve, reject) => { child.once('error', reject); child.once('close', resolve); });
@@ -51,7 +60,7 @@ try {
   await phase('browser-pilot-30', 'browser', 30, 30, 1);
   const full = await phase('full-30', 'simulator', 30, 100, 5);
   const [lo, hi] = full.paired.survivalSeconds.ci95 ?? [Infinity, Infinity];
-  if (Object.values(full.methods).every(m => m.clearRate >= 0.95) && lo <= 0 && hi >= 0) {
+  if (!state.fixedTime && Object.values(full.methods).every(m => m.clearRate >= 0.95) && lo <= 0 && hi >= 0) {
     state.extensionReason = 'Both 30s full clear rates >=95% and survival-difference interval includes zero; extend to 120s.';
     await save();
     await phase('browser-pilot-120', 'browser', 120, 30, 1);

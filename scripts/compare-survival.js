@@ -10,6 +10,7 @@ import { loadPredictionEngine } from '../src/engine.js';
 import { configureGame, playSession } from '../src/cli.js';
 import { EXPERIMENT_OPTIONS, EXPERIMENT_ENEMIES, experimentPolicy, simulatorTrial, finishTrial } from '../src/experiment.js';
 import { writeExperimentReport } from '../src/experiment-report.js';
+import { validateEnemyCounts } from '../src/state.js';
 
 const { values } = parseArgs({ options: {
   mode: { type: 'string', default: 'simulator' }, live: { type: 'boolean', default: false },
@@ -17,6 +18,7 @@ const { values } = parseArgs({ options: {
   repeats: { type: 'string', default: '1' }, time: { type: 'string', default: '30' },
   'max-calls': { type: 'string', default: '300' }, 'selection-seed': { type: 'string', default: '1' },
   output: { type: 'string' }, 'no-plot': { type: 'boolean', default: false },
+  enemies: { type: 'string' },
 } });
 function integer(name, min = 1, max = Number.MAX_SAFE_INTEGER) {
   const n = Number(values[name]);
@@ -26,6 +28,7 @@ function integer(name, min = 1, max = Number.MAX_SAFE_INTEGER) {
 const seedCount = integer('seed-count'), repeats = integer('repeats'), time = integer('time');
 const startSeed = integer('start-seed', 0, 0xffffffff), selectionSeed = integer('selection-seed', 0, 0xffffffff);
 const maxCalls = integer('max-calls', 0);
+const enemyCounts = validateEnemyCounts(values.enemies ? JSON.parse(values.enemies) : EXPERIMENT_ENEMIES);
 if (!Number.isSafeInteger(seedCount * repeats * 2)) throw new Error('予定試行数が安全な整数範囲を超えます。');
 if (!['simulator', 'browser'].includes(values.mode)) throw new Error('modeはsimulatorまたはbrowserです。');
 if (![30, 120].includes(time)) throw new Error('比較のtimeは30または120秒です。');
@@ -52,7 +55,7 @@ const manifest = { version: 1, issue: 'https://github.com/SSsan-00/mononoke-auto
   rulesDigest: engine.rulesDigest, predictionDigest: engine.digest,
   startedAt: new Date().toISOString(), mode: values.mode, live: values.live,
   model: values.live ? model : 'mock (last supplied candidate)', time,
-  profile: { field: 'S', lives: 1, time, enemies: EXPERIMENT_ENEMIES },
+  profile: { field: 'S', lives: 1, time, enemies: enemyCounts },
   options: EXPERIMENT_OPTIONS, seedCount, repeats, plannedTrials: seedCount * repeats * 2,
   startSeed: values.mode === 'simulator' ? startSeed : null,
   selectionSeed, maxCalls, retryPolicy: 'none; stop entire batch on HTTP 401/402/403, global call limit, or 3 consecutive Jev trials aborted for the same reason',
@@ -75,7 +78,7 @@ async function browserSetup() {
   if (await adjust.count()) await adjust.click();
   else if (await page.getByRole('button', { name: 'THREAT SETUP へ戻る', exact: true }).isVisible())
     await page.getByRole('button', { name: 'THREAT SETUP へ戻る', exact: true }).click();
-  await configureGame(page, { field: 'S', lives: '1', time: String(time), 'each-enemy': '5' });
+  await configureGame(page, { field: 'S', lives: '1', time: String(time), enemyCounts });
 }
 
 try {

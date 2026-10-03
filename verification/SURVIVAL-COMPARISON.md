@@ -38,6 +38,10 @@ npm run compare:survival -- --mode browser --live --seed-count 100 --repeats 5 -
 
 ## 成果物・再集計
 
+敵構成は `--enemies '{"CHASER":10,"DASHER":10,"JAMMER":10}'` のように指定できます。省略した敵は0体です。ゲームの通常設定に合わせ各10体・合計30体まで検証し、ブラウザでも設定UIから指定します。S・30秒を固定して研究を続ける場合は `npm run study:survival -- runs/study-custom --enemies '{"CHASER":10,"DASHER":10,"JAMMER":10}' --fixed-time` を使います。`--fixed-time` は120秒への自動拡張を無効にします。
+
+API不要の敗北条件探索は `node scripts/find-failure-cases.js runs/failure-search`、発見済みの構成を独立シードで確認する場合は `node scripts/find-failure-cases.js runs/failure-confirm --confirm-profile '{"CHASER":10,"DASHER":10,"JAMMER":10}'` です。確認はゲームシード3～12と選択用シード11・29を組み合わせます。同じゲームシードの2回を独立した20種類の初期条件とはみなしません。
+
 全段階を順番に実行する場合は `MONONOKE_PYTHON=.venv/bin/python npm run study:survival -- runs/study` を使います。30秒の原本pilot（60試行）から使用量を見積もり、ブラウザpilot（60試行）、原本の本実験（1,000試行）へ進みます。30秒本実験で両方式のクリア率が95%以上、かつ生存差の区間が0を含む場合は、理由を記録し120秒のブラウザpilotと原本本実験を追加します。各段階の上限はAPI100万回、再試行なし。`study.json` に進捗を保存し、終了・中断時に `STUDY.md` を出力します。
 
 この手順で生存性能は本実験1,000試行、ブラウザ実時間は各時間条件60試行を評価します。すべての1,000試行でブラウザ時間も測る場合は上記の `--mode browser` の本実験コマンドを指定してください。

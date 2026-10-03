@@ -9,6 +9,7 @@ import { JevPolicy } from "./jev.js";
 import { PlannerPolicy } from "./planner.js";
 import { loadPredictionEngine } from "./engine.js";
 import { RandomPolicy, SelectionRandom } from "./survival.js";
+import { validateEnemyCounts } from "./state.js";
 
 const GAME_URL = "https://aigengames.pages.dev/Games/SurviveLimitMononoke/";
 
@@ -169,8 +170,9 @@ export async function configureGame(page, values) {
     if (!(await button.innerText()).includes(`×${values.lives}`))
       throw new Error("ライフの設定に失敗しました。");
   }
-  if (values["each-enemy"] !== undefined) {
-    const target = Number(values["each-enemy"]);
+  if (values["each-enemy"] !== undefined || values.enemyCounts) {
+    const targets = values.enemyCounts ? Object.values(validateEnemyCounts(values.enemyCounts))
+      : Array(6).fill(Number(values["each-enemy"]));
     const rows = page.locator(".enemy-row");
     // まず全種類を0体へ戻し、途中で合計30体の上限に当たらないようにします。
     for (let i = 0; i < 6; i++) {
@@ -179,7 +181,7 @@ export async function configureGame(page, values) {
         await row.getByRole("button", { name: "−", exact: true }).click();
     }
     for (let i = 0; i < 6; i++)
-      for (let n = 0; n < target; n++)
+      for (let n = 0; n < targets[i]; n++)
         await rows
           .nth(i)
           .getByRole("button", { name: "+", exact: true })
@@ -200,6 +202,7 @@ export async function main() {
       field: { type: "string" },
       lives: { type: "string" },
       "each-enemy": { type: "string" },
+      enemies: { type: "string" },
       hard: { type: "boolean", default: false },
       attempts: { type: "string" },
       depth: { type: "string" },
@@ -221,7 +224,7 @@ export async function main() {
   });
   if (values.help) {
     console.log(
-      "npm start -- [--provider heuristic|planner|jev|random] [--comparison] [--selection-seed N] [--candidate-budget N] [--all-attempts] [--hard] [--rolling] [--jev-direct] [--depth N] [--width N] [--route-width 128] [--route-budget 750000] [--attempts 3] [--field S|M|L] [--lives 1..5] [--each-enemy 0..5] [--time 30|45|60|90|120] [--manual] [--channel chrome] [--headless] [--close-after] [--interval 100] [--max-calls 1000] [--output runs]",
+      "npm start -- [--provider heuristic|planner|jev|random] [--comparison] [--selection-seed N] [--candidate-budget N] [--all-attempts] [--hard] [--rolling] [--jev-direct] [--depth N] [--width N] [--route-width 128] [--route-budget 750000] [--attempts 3] [--field S|M|L] [--lives 1..5] [--each-enemy 0..5] [--enemies JSON] [--time 30|45|60|90|120] [--manual] [--channel chrome] [--headless] [--close-after] [--interval 100] [--max-calls 1000] [--output runs]",
     );
     return;
   }
@@ -240,8 +243,12 @@ export async function main() {
     values.field ??= "L";
     values.lives ??= "1";
     values.time ??= "30";
-    values["each-enemy"] ??= "5";
+    if (values.enemies === undefined) values["each-enemy"] ??= "5";
     values.attempts ??= "3";
+  }
+  if (values.enemies !== undefined) {
+    if (values['each-enemy'] !== undefined) throw new Error('enemiesとeach-enemyは同時に指定できません。');
+    values.enemyCounts = validateEnemyCounts(JSON.parse(values.enemies));
   }
   const positive = (value, name) => {
     const n = Number(value);
