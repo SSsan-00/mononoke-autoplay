@@ -1,5 +1,7 @@
 # Jevでプレイする
 
+`--comparison` を付けると、issue #1の「初手ごとに同じ探索幅で見つけた20手の生存候補」から選ぶ比較モードになります。従来の標準Jev版とは候補生成条件が異なります。`--provider random` が同じ候補から均等ランダムで選ぶ対照です。実験・計測・再集計の手順は[比較実験の説明](verification/SURVIVAL-COMPARISON.md)を参照してください。
+
 通常起動はローカル版です。`npm run jev`または`--provider jev`でJevを利用できます。`--hard`はJevでも指定できます。
 
 ## 接続設定

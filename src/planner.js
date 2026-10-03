@@ -293,6 +293,55 @@ export class PlannerPolicy {
       else this.visits.delete(key);
   }
 
+  // 初手ごとに独立した同幅のbeamを使う。未到達・予算切れは生存候補にしない。
+  findSurvivalCandidates(root, snapshot, budgetPerAction = this.depth * this.width * 5) {
+    if (!Number.isInteger(budgetPerAction) || budgetPerAction < 1)
+      throw new Error("初手ごとの探索予算は正の整数で指定してください。");
+    const candidates = [], outcomes = [];
+    for (const first of legalActions(root.state)) {
+      let beam = [{ sim: root, cost: 0, exposure: 0 }];
+      let branches = 0, reachedDepth = 0, longestMs = 0, found = null, reason = "no-route";
+      for (let depth = 0; depth < this.depth; depth++) {
+        this.signal?.throwIfAborted();
+        const children = [];
+        let exhausted = false;
+        for (const node of beam) {
+          for (const action of depth === 0 ? [first] : legalActions(node.sim.state)) {
+            if (branches >= budgetPerAction) { exhausted = true; break; }
+            branches++;
+            const copy = this.advanceCandidate(node.sim, action);
+            longestMs = Math.max(longestMs,
+              (copy.state.deathAtMs ?? copy.state.elapsedMs) - snapshot.elapsedMs);
+            if (copy.state.status === "dying" || copy.state.status === "failed") continue;
+            const child = { sim: copy,
+              ...this.scoreCandidate(copy, root, snapshot, node.exposure, depth) };
+            if (copy.state.status === "cleared" || depth + 1 === this.depth) {
+              found = child; reason = copy.state.status === "cleared" ? "cleared" : "horizon"; break;
+            }
+            children.push(child);
+          }
+          if (exhausted || found) break;
+        }
+        reachedDepth = depth + 1;
+        if (found) break;
+        if (exhausted) { reason = "budget"; break; }
+        if (!children.length) break;
+        beam = this.selectBeam(children, this.width, 3);
+        if (reachedDepth === this.depth) { found = beam[0]; reason = "horizon"; }
+      }
+      outcomes.push({ action: first, reason, reachedDepth, evaluatedBranches: branches, longestMs });
+      if (found) candidates.push({ action: first, cost: found.cost,
+        lives: found.sim.state.lives, damageTaken: found.sim.state.damageTaken - root.state.damageTaken,
+        survivalMs: found.sim.state.elapsedMs - snapshot.elapsedMs,
+        reachedDepth, reason });
+    }
+    const longestMs = Math.max(...outcomes.map(item => item.longestMs));
+    return { candidates, outcomes, searchedDepth: this.depth, budgetPerAction,
+      evaluatedBranches: outcomes.reduce((sum, item) => sum + item.evaluatedBranches, 0),
+      fallbackActions: outcomes.filter(item => Math.abs(item.longestMs - longestMs) < 0.001)
+        .map(item => item.action), predictedSurvivalMs: longestMs };
+  }
+
   async decide(snapshot) {
     this.signal?.throwIfAborted();
     this.synchronize(snapshot);

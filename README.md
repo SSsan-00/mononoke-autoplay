@@ -80,6 +80,8 @@ npm start -- --hard --attempts 10
 
 ## Jevについて
 
+ランダムとJevの最後の選択だけを比較するissue #1の実験器を追加しました。生存候補の定義、固定シード・ブラウザ測定、API上限、ログと再集計の手順は[比較実験の説明](verification/SURVIVAL-COMPARISON.md)を参照してください。
+
 Jevは任意で利用できます。通常起動はAPI不要のローカル版です。
 
 ```bash
@@ -175,7 +177,11 @@ APIエラーなどで途中停止した場合、`decisions.jsonl`が残ること
 
 | オプション | 標準値・意味 |
 | --- | --- |
-| `--provider heuristic\|planner\|jev` | `planner`。Jevは明示指定時だけ使用 |
+| `--provider heuristic\|planner\|jev\|random` | `planner`。randomは共通生存候補の比較用 |
+| `--comparison` | Jevで共通生存候補を使う比較モード（深さ20・幅24・100ms） |
+| `--selection-seed N` | 比較用の選択乱数シード。ゲーム乱数とは独立 |
+| `--candidate-budget N` | 比較モードで初手ごとに割り当てる探索枝数の上限 |
+| `--all-attempts` | クリアしても指定試行数を続ける |
 | `--hard` | 先読みでL・各5体・30秒・ライフ1、最大3回の通常プレイ |
 | `--rolling` | 終了までの経路探索を省き、短期の先読みだけを使う |
 | `--depth N` | 短期の探索深さ、1～20。plannerは8、jevは20 |
